@@ -4,15 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
-    "net"
 
-    "crypto/hmac"
-    "crypto/sha256"
+	"crypto/hmac"
+	"crypto/sha256"
 
 	"github.com/Shopify/sarama"
 	kafka "github.com/bwNetFlow/kafkaconnector"
@@ -74,10 +74,10 @@ func timeout(mins time.Duration, ch chan<- bool) {
 }
 
 func connectToKafka(credentials map[string]string) {
-    broker := credentials["brokers"]
-    topic := []string{credentials["topic"]}
-    consumerGroup := credentials["grp_id"]
-    kafkaConn.SetAuth(credentials["user"], credentials["pwd"])
+	broker := credentials["brokers"]
+	topic := []string{credentials["topic"]}
+	consumerGroup := credentials["grp_id"]
+	kafkaConn.SetAuth(credentials["user"], credentials["pwd"])
 	kafkaConn.StartConsumer(broker, topic, consumerGroup, sarama.OffsetNewest)
 }
 
@@ -100,29 +100,29 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string) {
 		return
 	}
 	reflected_flow := reflect.ValueOf(flow)
-    var addr net.IP
+	var addr net.IP
 	for _, fieldname := range fields {
 		field := reflect.Indirect(reflected_flow).FieldByName(fieldname)
-        if field.Kind() == reflect.Slice && reflect.ValueOf(field.Bytes()[0]).Kind() == reflect.Uint8 {
-            byteAddr := field.Bytes()
-            if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
-                h := hmac.New(sha256.New, []byte(secret))
-                if len(byteAddr) == 4 {
-                    h.Write(byteAddr[2:])
-                    byteAddr[2] = h.Sum(nil)[2]
-                    byteAddr[3] = h.Sum(nil)[3]
-                } else if len(byteAddr) == 16 {
-                    h.Write(byteAddr[8:])
-                    for i := 8; i < 16; i++ {
-                        byteAddr[i] = h.Sum(nil)[i]
-                    }
-                }
-            }
-            addr = net.IP(byteAddr)
-            csv_line = csv_line + fmt.Sprint(addr) + ","
-        } else {
-		    csv_line = csv_line + fmt.Sprint(field) + ","
-        }
+		if field.Kind() == reflect.Slice && reflect.ValueOf(field.Bytes()[0]).Kind() == reflect.Uint8 {
+			byteAddr := field.Bytes()
+			if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
+				h := hmac.New(sha256.New, []byte(secret))
+				if len(byteAddr) == 4 {
+					h.Write(byteAddr[2:])
+					byteAddr[2] = h.Sum(nil)[2]
+					byteAddr[3] = h.Sum(nil)[3]
+				} else if len(byteAddr) == 16 {
+					h.Write(byteAddr[8:])
+					for i := 8; i < 16; i++ {
+						byteAddr[i] = h.Sum(nil)[i]
+					}
+				}
+			}
+			addr = net.IP(byteAddr)
+			csv_line = csv_line + fmt.Sprint(addr) + ","
+		} else {
+			csv_line = csv_line + fmt.Sprint(field) + ","
+		}
 	}
 	csv_line_len = len(csv_line)
 	csv_line = csv_line[:csv_line_len-1]
