@@ -1,14 +1,14 @@
 package main
 
 import (
-    "reflect"
 	"flag"
 	"fmt"
 	"os"
+	"reader"
+	"reflect"
 	"strconv"
+	"strings"
 	"time"
-    "strings"
-    "reader"
 
 	"github.com/Shopify/sarama"
 	kafka "github.com/bwNetFlow/kafkaconnector"
@@ -56,41 +56,41 @@ func connectToKafka() {
 }
 
 func writeColumnDescr(file *os.File, fields []string) bool {
-    if len(fields) == 0 {
-        return false
-    } else {
-        descr := strings.Join(fields, ",")
-        fmt.Fprintf(file, "%s\n", descr)
-        return true
-    }
+	if len(fields) == 0 {
+		return false
+	} else {
+		descr := strings.Join(fields, ",")
+		fmt.Fprintf(file, "%s\n", descr)
+		return true
+	}
 }
 
 func writeToCsv(file *os.File, fields []string) {
-    var csv_line string
-    var csv_line_len int
-    flow, ok := <-kafkaConn.ConsumerChannel()
-    if !ok {
-        fmt.Fprintf(os.Stderr, "Could not read from consumer channel... skipping message.")
-        return
-    }
-    reflected_flow := reflect.ValueOf(flow)
-    for _, fieldname := range fields {
-        field := reflect.Indirect(reflected_flow).FieldByName(fieldname)
-        csv_line = csv_line + fmt.Sprint(field) + ","
-    }
-    csv_line_len = len(csv_line)
-    csv_line = csv_line[:csv_line_len-1]
-    fmt.Fprintf(file, "%s\n" , csv_line)
+	var csv_line string
+	var csv_line_len int
+	flow, ok := <-kafkaConn.ConsumerChannel()
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Could not read from consumer channel... skipping message.")
+		return
+	}
+	reflected_flow := reflect.ValueOf(flow)
+	for _, fieldname := range fields {
+		field := reflect.Indirect(reflected_flow).FieldByName(fieldname)
+		csv_line = csv_line + fmt.Sprint(field) + ","
+	}
+	csv_line_len = len(csv_line)
+	csv_line = csv_line[:csv_line_len-1]
+	fmt.Fprintf(file, "%s\n", csv_line)
 }
 
 func main() {
 	flag.Parse()
-    fields := flag.Args()
+	fields := flag.Args()
 
-    credentials, _ := reader.readIni(*usrcrd)
-    for k, v := range credentials {
-        fmt.Fprintf("%s:%s\n", k, v)
-    }
+	credentials, _ := reader.readIni(*usrcrd)
+	for k, v := range credentials {
+		fmt.Fprintf("%s:%s\n", k, v)
+	}
 
 	connectToKafka()
 	defer kafkaConn.Close()
@@ -103,11 +103,11 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stdout, "File %s has been created\n", filename)
-    ok := writeColumnDescr(file, fields)
-    if !ok {
-        fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
-        os.Exit(1)
-    }
+	ok := writeColumnDescr(file, fields)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
+		os.Exit(1)
+	}
 
 	ch := make(chan bool)
 
@@ -124,11 +124,11 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Fprintf(os.Stdout, "File %s has been created\n", filename)
-            ok := writeColumnDescr(file, fields)
-            if !ok {
-                fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
-                os.Exit(1)
-            }
+			ok := writeColumnDescr(file, fields)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
+				os.Exit(1)
+			}
 			go timeout(time.Duration(*duration), ch)
 		default:
 			writeToCsv(file, fields)
