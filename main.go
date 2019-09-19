@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+    "math"
+    "math/rand"
+    "encoding/binary"
 	"crypto/hmac"
 	"crypto/sha256"
 
@@ -45,6 +48,35 @@ func readIni(path string) (content map[string]string, ok bool) {
 	return content, ok
 }
 
+/* --- TODO: ERROR HANDLING IN THE CASE THAT THE RANGE BIT ARE SMALLER THAN 8 --- */
+func init_subnets(subnet_range_bit int, host_range_bit int, master_key []byte) *[]*[]uint16 {
+	subnet_byte_repr := make([]byte, 8)
+	subnet_list_length := int(math.Pow(2, float64(subnet_range_bit)))
+	host_list_length := int(math.Pow(2, float64(host_range_bit)))
+	fmt.Fprintf(os.Stdout, "subnet: %d, host: %d\n", subnet_list_length, host_list_length)
+	subnet_list := make([]*[]uint16, subnet_list_length)
+	for i := 0; i < subnet_list_length; i++ {
+		binary.PutVarint(subnet_byte_repr, int64(i))
+		seed := calc_key(master_key, subnet_byte_repr)
+		tmp := make([]uint16, host_list_length)
+		subnet_list[i] = &tmp
+		init_list(subnet_list[i], host_list_length)
+		shuffle_list(subnet_list[i], seed)
+	}
+	return &subnet_list
+}
+
+func calc_key(master []byte, subnet []byte) int64 {
+	sha256 := sha256.Sum256(append(master, subnet...))
+    var key int64
+	var i uint
+	for i = 0; i < 32; i++ {
+		key = key << i
+		key += int64(sha256[i])
+	}
+	return key
+}
+
 func expandDatePart(part string) string {
 	var expandedPart string
 	if len(part) < 2 {
@@ -53,6 +85,40 @@ func expandDatePart(part string) string {
 		expandedPart = part
 	}
 	return expandedPart
+}
+
+func init_list(list *[]uint16, different_nmbrs int) {
+	for i := 0; i < different_nmbrs; i++ {
+		(*list)[i] = uint16(i)
+	}
+}
+
+func shuffle_list(list *[]uint16, seed int64) {
+	rand.Seed(seed)
+	for i := len(*list) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		(*list)[i], (*list)[j] = (*list)[j], (*list)[i]
+	}
+}
+
+func pseudomyze_ip(addr []byte, lists *[]*[]uint16) []byte {
+	var subnet_part uint16
+	var host_part uint16
+
+	subnet_part = uint16(addr[0])
+	subnet_part = subnet_part << 8
+	subnet_part += uint16(addr[1])
+
+    host_part = uint16(addr[2])
+    host_part = host_part << 8
+    host_part += uint16(addr[3])
+
+    pseudonymized_host_part := (*(*lists)[subnet_part])[host_part]
+
+    pseudonymized_byte_addr := addr
+    pseudonymized_byte_addr[2] = byte(pseudonymized_host_part >> 8)
+    pseudonymized_byte_addr[3] = byte(pseudonymized_host_part)
+    return pseudonymized_byte_addr
 }
 
 func createFileName(path string, now time.Time) (name string, ok bool) {
@@ -91,7 +157,7 @@ func writeColumnDescr(file *os.File, fields []string) bool {
 	}
 }
 
-func writeToCsv(credentials map[string]string, file *os.File, fields []string) {
+func writeToCsv(credentials map[string]string, file *os.File, fields []string, lists *[]*[]uint16) {
 	var csv_line string
 	var csv_line_len int
 	flow, ok := <-kafkaConn.ConsumerChannel()
@@ -106,12 +172,15 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string) {
 		if field.Kind() == reflect.Slice && reflect.ValueOf(field.Bytes()[0]).Kind() == reflect.Uint8 {
 			byteAddr := field.Bytes()
 			if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
-				h := hmac.New(sha256.New, []byte(secret))
 				if len(byteAddr) == 4 {
+                    byteAddr = pseudomyze_ip(byteAddr, lists)
+                    /*
 					h.Write(byteAddr[2:])
 					byteAddr[2] = h.Sum(nil)[2]
 					byteAddr[3] = h.Sum(nil)[3]
+                    */
 				} else if len(byteAddr) == 16 {
+				    h := hmac.New(sha256.New, []byte(secret))
 					h.Write(byteAddr[8:])
 					for i := 8; i < 16; i++ {
 						byteAddr[i] = h.Sum(nil)[i]
@@ -134,6 +203,16 @@ func main() {
 	fields := flag.Args()
 
 	credentials, _ := readIni(*usrcrd)
+
+	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
+    var lists *[]*[]uint16
+	if credentials["anonymization"] == "yes" {
+		fmt.Fprintf(os.Stdout, "Pseudonymization YES... initializing tables...\n")
+        lists = init_subnets(16, 16, []byte("masterkey"))
+	} else {
+        lists = nil
+		fmt.Fprintf(os.Stdout, "Pseudonymization NO\n")
+    }
 
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
@@ -174,7 +253,7 @@ func main() {
 			}
 			go timeout(time.Duration(*duration), ch)
 		default:
-			writeToCsv(credentials, file, fields)
+			writeToCsv(credentials, file, fields, lists)
 		}
 	}
 
