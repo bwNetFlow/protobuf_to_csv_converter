@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-    "math"
-    "math/rand"
-    "encoding/binary"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/binary"
+	"math"
+	"math/rand"
 
 	"github.com/Shopify/sarama"
 	kafka "github.com/bwNetFlow/kafkaconnector"
@@ -68,7 +68,7 @@ func init_subnets(subnet_range_bit int, host_range_bit int, master_key []byte) *
 
 func calc_key(master []byte, subnet []byte) int64 {
 	sha256 := sha256.Sum256(append(master, subnet...))
-    var key int64
+	var key int64
 	var i uint
 	for i = 0; i < 32; i++ {
 		key = key << i
@@ -109,16 +109,16 @@ func pseudomyze_ip(addr []byte, lists *[]*[]uint16) []byte {
 	subnet_part = subnet_part << 8
 	subnet_part += uint16(addr[1])
 
-    host_part = uint16(addr[2])
-    host_part = host_part << 8
-    host_part += uint16(addr[3])
+	host_part = uint16(addr[2])
+	host_part = host_part << 8
+	host_part += uint16(addr[3])
 
-    pseudonymized_host_part := (*(*lists)[subnet_part])[host_part]
+	pseudonymized_host_part := (*(*lists)[subnet_part])[host_part]
 
-    pseudonymized_byte_addr := addr
-    pseudonymized_byte_addr[2] = byte(pseudonymized_host_part >> 8)
-    pseudonymized_byte_addr[3] = byte(pseudonymized_host_part)
-    return pseudonymized_byte_addr
+	pseudonymized_byte_addr := addr
+	pseudonymized_byte_addr[2] = byte(pseudonymized_host_part >> 8)
+	pseudonymized_byte_addr[3] = byte(pseudonymized_host_part)
+	return pseudonymized_byte_addr
 }
 
 func createFileName(path string, now time.Time) (name string, ok bool) {
@@ -173,14 +173,14 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 			byteAddr := field.Bytes()
 			if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
 				if len(byteAddr) == 4 {
-                    byteAddr = pseudomyze_ip(byteAddr, lists)
-                    /*
-					h.Write(byteAddr[2:])
-					byteAddr[2] = h.Sum(nil)[2]
-					byteAddr[3] = h.Sum(nil)[3]
-                    */
+					byteAddr = pseudomyze_ip(byteAddr, lists)
+					/*
+						h.Write(byteAddr[2:])
+						byteAddr[2] = h.Sum(nil)[2]
+						byteAddr[3] = h.Sum(nil)[3]
+					*/
 				} else if len(byteAddr) == 16 {
-				    h := hmac.New(sha256.New, []byte(secret))
+					h := hmac.New(sha256.New, []byte(secret))
 					h.Write(byteAddr[8:])
 					for i := 8; i < 16; i++ {
 						byteAddr[i] = h.Sum(nil)[i]
@@ -205,14 +205,14 @@ func main() {
 	credentials, _ := readIni(*usrcrd)
 
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
-    var lists *[]*[]uint16
+	var lists *[]*[]uint16
 	if credentials["anonymization"] == "yes" {
 		fmt.Fprintf(os.Stdout, "Pseudonymization YES... initializing tables...\n")
-        lists = init_subnets(16, 16, []byte("masterkey"))
+		lists = init_subnets(16, 16, []byte("masterkey"))
 	} else {
-        lists = nil
+		lists = nil
 		fmt.Fprintf(os.Stdout, "Pseudonymization NO\n")
-    }
+	}
 
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
@@ -237,7 +237,11 @@ func main() {
 	for {
 		select {
 		case _ = <-ch:
-			file.Close()
+			err := file.Close()
+			if err != nil {
+				fmt.Println(err)
+			}
+
 			start = time.Now()
 			filename, _ = createFileName(*path, start)
 			file, err = os.Create(filename)
