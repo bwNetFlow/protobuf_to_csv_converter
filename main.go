@@ -19,13 +19,21 @@ import (
 
 	"github.com/Shopify/sarama"
 	kafka "github.com/bwNetFlow/kafkaconnector"
+
+    /* --- PROFILING CODE  --- */
+    "runtime/pprof"
+    "log"
+    "runtime/debug"
 )
 
 var secret string = "whatever"
 var kafkaConn = kafka.Connector{}
-var usrcrd = flag.String("u", "", "Path for user credential file")
-var path = flag.String("p", "", "Path to CSV file that is created")
+var usrcrd = flag.String("u", "", "Path to the user credential file")
+var path = flag.String("p", "", "Path to the target directory where the CSV output files are saved")
 var duration = flag.Int("d", 5, "Amount of time that is written into one file")
+
+/* --- PROFILING CODE --- */
+var memprofile = flag.String("memprofile", "", "Write memory profile to file")
 
 func readIni(path string) (content map[string]string, ok bool) {
 	fmt.Fprintf(os.Stdout, "Trying to read from file %s\n", path)
@@ -63,6 +71,7 @@ func init_subnets(subnet_range_bit int, host_range_bit int, master_key []byte) *
 		init_list(subnet_list[i], host_list_length)
 		shuffle_list(subnet_list[i], seed)
 	}
+
 	return &subnet_list
 }
 
@@ -174,7 +183,7 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 			if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
 				if len(byteAddr) == 4 {
 					byteAddr = pseudomyze_ip(byteAddr, lists)
-					/*
+                    /*
 						h.Write(byteAddr[2:])
 						byteAddr[2] = h.Sum(nil)[2]
 						byteAddr[3] = h.Sum(nil)[3]
@@ -201,6 +210,19 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 func main() {
 	flag.Parse()
 	fields := flag.Args()
+
+    /* --- PROFILING CODE --- */
+    /*
+    if *cpuprofile != "" {
+        f, err := os.Create(*cpuprofile)
+        if err != nil {
+            log.Fatal(err)
+        }
+        pprof.StartCPUProfile(f)
+        defer pprof.StopCPUProfile()
+    }
+    */
+    /* --- PROFILING CODE END --- */
 
 	credentials, _ := readIni(*usrcrd)
 
@@ -242,6 +264,8 @@ func main() {
 				fmt.Println(err)
 			}
 
+            debug.FreeOSMemory()
+
 			start = time.Now()
 			filename, _ = createFileName(*path, start)
 			file, err = os.Create(filename)
@@ -262,4 +286,15 @@ func main() {
 	}
 
 	file.Close()
+
+    /* --- MEMORY PROFILING --- */
+    if *memprofile != "" {
+        f, err := os.Create(*memprofile)
+        if err != nil {
+            log.Fatal(err)
+        }
+        pprof.WriteHeapProfile(f)
+        f.Close()
+    }
+    /* --- MEMORY PROFILING END --- */
 }
