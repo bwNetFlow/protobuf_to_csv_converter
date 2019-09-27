@@ -20,44 +20,17 @@ import (
 	"github.com/Shopify/sarama"
 	kafka "github.com/bwNetFlow/kafkaconnector"
 
-	/* --- PROFILING CODE  --- */
-	"log"
-	"runtime"
 	"runtime/debug"
-	"runtime/pprof"
-	//    "syscall"
 )
-
-//var csv_line string
-//var csv_line_len int
-//var csv_line strings.Builder
-
-var csv_line csvLine
 
 var secret string = "whatever"
 var kafkaConn = kafka.Connector{}
+
+/* --- COMMAND LINE FLAGS --- */
 var usrcrd = flag.String("u", "", "Path to the user credential file")
 var path = flag.String("p", "", "Path to the target directory where the CSV output files are saved")
 var duration = flag.Int("d", 5, "Amount of time that is written into one file")
-
-/* --- PROFILING CODE --- */
-var memprofile = flag.String("memprofile", "", "Write memory profile to file")
-var cpuprofile = flag.String("cpuprofile", "", "Write cpu profile to file")
-
-type csvLine struct {
-    bytes uint64
-    packets uint64
-    srcAddr net.IP
-    dstAddr net.IP
-    srcPort uint32
-    dstPort uint32
-    timeFlowStart uint64
-    duration uint64
-}
-
-func (line *csvLine) writeLine(file *os.File) {
-    fmt.Fprintf(file, "%v,%v,%v,%v,%v,%v,%v,%v\n", line.bytes, line.packets, line.srcAddr, line.dstAddr, line.srcPort, line.dstPort, line.timeFlowStart, line.duration)
-}
+var gc = flag.Int("gc", 50, "Garbage Collector behavior. Default=50%")
 
 func readIni(path string) (content map[string]string, ok bool) {
 	fmt.Fprintf(os.Stdout, "Trying to read from file %s\n", path)
@@ -191,73 +164,23 @@ func writeColumnDescr(file *os.File, fields []string) bool {
 }
 
 func processIPs(credentials map[string]string, addr []byte, lists *[]*[]uint16) net.IP {
-    if credentials["anonymization"] == "yes" {
-        if len(addr) == 4 {
-            addr = pseudomyze_ip(addr, lists)
-        } else if len(addr) == 16 {
-            h := hmac.New(sha256.New, []byte(secret))
-            h.Write(addr[8:])
-            for i := 8; i < 16; i++ {
-                addr[i] = h.Sum(nil)[i]
-            }
-        }
-    }
-    return net.IP(addr)
-}
-
-func writeToCsv2(credentials map[string]string, file *os.File, fields []string, lists *[]*[]uint16) {
-//    var csv_line strings.Builder
-//    csv_line.Grow(60)
-
-    flow, ok := <-kafkaConn.ConsumerChannel()
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Could not read from consumer channel... skipping message.")
-		return
+	if credentials["anonymization"] == "yes" {
+		if len(addr) == 4 {
+			addr = pseudomyze_ip(addr, lists)
+		} else if len(addr) == 16 {
+			h := hmac.New(sha256.New, []byte(secret))
+			h.Write(addr[8:])
+			for i := 8; i < 16; i++ {
+				addr[i] = h.Sum(nil)[i]
+			}
+		}
 	}
-    if flow == nil {
-        return
-    }
-    for _, fieldname := range fields {
-        if fieldname == "Bytes" {
-            csv_line.bytes = flow.GetBytes()
-            //csv_line.WriteString(fmt.Sprintf("%v,", bytes))
-        } else if fieldname == "Packets" {
-            csv_line.packets = flow.GetPackets()
-            //csv_line.WriteString(fmt.Sprintf("%v,", packets))
-        } else if fieldname == "SrcAddr" {
-            srcAddr := flow.GetSrcAddr()
-            //csv_line.WriteString(fmt.Sprintf("%v,", processIPs(credentials, srcAddr, lists)))
-            csv_line.srcAddr = processIPs(credentials, srcAddr, lists)
-        } else if fieldname == "DstAddr" {
-            dstAddr := flow.GetDstAddr()
-            //csv_line.WriteString(fmt.Sprintf("%v,", processIPs(credentials, dstAddr, lists)))
-            csv_line.dstAddr = processIPs(credentials, dstAddr, lists)
-        } else if fieldname == "SrcPort" {
-            csv_line.srcPort = flow.GetSrcPort()
-            //csv_line.WriteString(fmt.Sprintf("%v,", srcPort))
-        } else if fieldname == "DstPort" {
-            csv_line.dstPort = flow.GetSrcPort()
-            //csv_line.WriteString(fmt.Sprintf("%v,", dstPort))
-        } else if fieldname == "TimeFlowStart" {
-            csv_line.timeFlowStart = flow.GetTimeFlowStart()
-            //csv_line.WriteString(fmt.Sprintf("%v,", timeFlowStart))
-        } else if fieldname == "Duration" {
-            timeFlowStart := flow.GetTimeFlowStart()
-            timeFlowEnd := flow.GetTimeFlowEnd()
-            csv_line.duration = timeFlowEnd - timeFlowStart
-            //csv_line.WriteString(fmt.Sprintf("%v,", duration))
-        }
-    }
-    //fmt.Fprintf(file, "%s\n", csv_line.String()[:csv_line.Len()-1])
-    //csv_line.Reset()
-    csv_line.writeLine(file)
+	return net.IP(addr)
 }
 
 func writeToCsv(credentials map[string]string, file *os.File, fields []string, lists *[]*[]uint16) {
-    var csv_line string
-    var csv_line_len int
-
-	//var csv_line strings.Builder
+	var csv_line string
+	var csv_line_len int
 
 	flow, ok := <-kafkaConn.ConsumerChannel()
 	if !ok {
@@ -273,18 +196,11 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 			flowEnd := reflect.Indirect(reflected_flow).FieldByName("TimeFlowEnd").Interface().(uint64)
 			Duration := flowEnd - flowStart
 			csv_line = csv_line + fmt.Sprint(Duration) + ","
-			//fmt.Fprintf(&csv_line, "%v,", Duration)
-			//csv_line.WriteString(fmt.Sprint(Duration))
 		} else if field.Kind() == reflect.Slice && reflect.ValueOf(field.Bytes()[0]).Kind() == reflect.Uint8 {
 			byteAddr := field.Bytes()
 			if credentials["anonymization"] == "yes" && (fieldname == "SrcAddr" || fieldname == "DstAddr") {
 				if len(byteAddr) == 4 {
 					byteAddr = pseudomyze_ip(byteAddr, lists)
-					/*
-						h.Write(byteAddr[2:])
-						byteAddr[2] = h.Sum(nil)[2]
-						byteAddr[3] = h.Sum(nil)[3]
-					*/
 				} else if len(byteAddr) == 16 {
 					h := hmac.New(sha256.New, []byte(secret))
 					h.Write(byteAddr[8:])
@@ -295,39 +211,24 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 			}
 			addr = net.IP(byteAddr)
 			csv_line = csv_line + fmt.Sprint(addr) + ","
-			//fmt.Fprintf(&csv_line, "%v,", addr)
-			//csv_line.WriteString(fmt.Sprint(addr))
 		} else {
 			csv_line = csv_line + fmt.Sprint(field) + ","
-			//fmt.Fprintf(&csv_line, "%v,", field)
-			//csv_line.WriteString(fmt.Sprint(field))
 		}
 	}
 	csv_line_len = len(csv_line)
 	csv_line = csv_line[:csv_line_len-1]
-	//fmt.Fprintf(file, "%s\n", csv_line.String()[:csv_line.Len()-1])
-    fmt.Fprintf(file, "%s\n", csv_line)
+	fmt.Fprintf(file, "%s\n", csv_line)
 	csv_line = ""
-	//    debug.FreeOSMemory()
 }
 
 func main() {
-	runtime.MemProfileRate = 1
-
 	flag.Parse()
 	fields := flag.Args()
 
-	/* --- PROFILING CODE --- */
-	   if *cpuprofile != "" {
-	       f, err := os.Create(*cpuprofile)
-	       if err != nil {
-	           log.Fatal(err)
-	       }
-	       pprof.StartCPUProfile(f)
-	       defer pprof.StopCPUProfile()
-	   }
-	/* --- PROFILING CODE END --- */
+	/* --- Set GC Percentage  --- */
+	debug.SetGCPercent(*gc)
 
+	/* --- Process given credential file  --- */
 	credentials, _ := readIni(*usrcrd)
 
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
@@ -340,6 +241,7 @@ func main() {
 		fmt.Fprintf(os.Stdout, "Pseudonymization NO\n")
 	}
 
+	/* --- Connect to the Kafka Cluster --- */
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
 
@@ -360,17 +262,14 @@ func main() {
 	ch := make(chan bool)
 
 	go timeout(time.Duration(*duration), ch)
-	for i := 0; i < 2000000; i++ {
-//    for {
+
+	for {
 		select {
 		case _ = <-ch:
 			err := file.Close()
 			if err != nil {
 				fmt.Println(err)
 			}
-
-			debug.FreeOSMemory()
-			//            debug.WriteHeapDump(uintptr(syscall.Stdout))
 
 			start = time.Now()
 			filename, _ = createFileName(*path, start)
@@ -387,20 +286,9 @@ func main() {
 			}
 			go timeout(time.Duration(*duration), ch)
 		default:
-			writeToCsv2(credentials, file, fields, lists)
+			writeToCsv(credentials, file, fields, lists)
 		}
 	}
 
 	file.Close()
-
-	/* --- MEMORY PROFILING --- */
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.WriteHeapProfile(f)
-		f.Close()
-	}
-	/* --- MEMORY PROFILING END --- */
 }
