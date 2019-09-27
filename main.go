@@ -4,13 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
-    "log"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -24,7 +24,7 @@ import (
 	"runtime/debug"
 )
 
-var secret string = "whatever"
+var bMasterkey []byte
 var kafkaConn = kafka.Connector{}
 
 /* --- COMMAND LINE FLAGS --- */
@@ -52,6 +52,15 @@ func readIni(path string) (content map[string]string, ok bool) {
 	}
 	ok = true
 	return content, ok
+}
+
+func retrieve_masterkey(credentials map[string]string) (masterkey []byte) {
+	sMasterkey := credentials["masterkey"]
+	if sMasterkey == "" {
+		return nil
+	} else {
+		return []byte(sMasterkey)
+	}
 }
 
 /* --- TODO: ERROR HANDLING IN THE CASE THAT THE RANGE BIT ARE SMALLER THAN 8 --- */
@@ -163,12 +172,13 @@ func writeColumnDescr(file *os.File, fields []string) bool {
 	}
 }
 
+/* --- Not in use atm --- */
 func processIPs(credentials map[string]string, addr []byte, lists *[]*[]uint16) net.IP {
 	if credentials["anonymization"] == "yes" {
 		if len(addr) == 4 {
 			addr = pseudomyze_ip(addr, lists)
 		} else if len(addr) == 16 {
-			h := hmac.New(sha256.New, []byte(secret))
+			h := hmac.New(sha256.New, bMasterkey)
 			h.Write(addr[8:])
 			for i := 8; i < 16; i++ {
 				addr[i] = h.Sum(nil)[i]
@@ -202,7 +212,7 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 				if len(byteAddr) == 4 {
 					byteAddr = pseudomyze_ip(byteAddr, lists)
 				} else if len(byteAddr) == 16 {
-					h := hmac.New(sha256.New, []byte(secret))
+					h := hmac.New(sha256.New, bMasterkey)
 					h.Write(byteAddr[8:])
 					for i := 8; i < 16; i++ {
 						byteAddr[i] = h.Sum(nil)[i]
@@ -234,11 +244,17 @@ func main() {
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
 	var lists *[]*[]uint16
 	if credentials["anonymization"] == "yes" {
-        log.Printf("Pseudonymization YES... initializing tables...\n")
-		lists = init_subnets(16, 16, []byte("masterkey"))
+		log.Printf("Pseudonymization YES... initializing tables...\n")
+		/* --- Retrieve Masterkey --- */
+		bMasterkey = retrieve_masterkey(credentials)
+		if bMasterkey == nil {
+			log.Printf("No Masterkey given... exiting...\n")
+			os.Exit(255)
+		}
+		lists = init_subnets(16, 16, bMasterkey)
 	} else {
 		lists = nil
-        log.Printf("Pseudonymization NO\n")
+		log.Printf("Pseudonymization NO\n")
 	}
 
 	/* --- Connect to the Kafka Cluster --- */
