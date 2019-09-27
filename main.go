@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+    "log"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -33,10 +34,10 @@ var duration = flag.Int("d", 5, "Amount of time that is written into one file")
 var gc = flag.Int("gc", 50, "Garbage Collector behavior. Default=50%")
 
 func readIni(path string) (content map[string]string, ok bool) {
-	fmt.Fprintf(os.Stdout, "Trying to read from file %s\n", path)
+	log.Printf("Trying to read from file %s\n", path)
 	ini, err := ioutil.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ioutil.ReadFile: Error reading %s (%v)\n", path, err)
+		log.Printf("ioutil.ReadFile: Error reading %s (%v)\n", path, err)
 		ok = false
 		return content, ok
 	}
@@ -58,7 +59,6 @@ func init_subnets(subnet_range_bit int, host_range_bit int, master_key []byte) *
 	subnet_byte_repr := make([]byte, 8)
 	subnet_list_length := int(math.Pow(2, float64(subnet_range_bit)))
 	host_list_length := int(math.Pow(2, float64(host_range_bit)))
-	fmt.Fprintf(os.Stdout, "subnet: %d, host: %d\n", subnet_list_length, host_list_length)
 	subnet_list := make([]*[]uint16, subnet_list_length)
 	for i := 0; i < subnet_list_length; i++ {
 		binary.PutVarint(subnet_byte_repr, int64(i))
@@ -234,11 +234,11 @@ func main() {
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
 	var lists *[]*[]uint16
 	if credentials["anonymization"] == "yes" {
-		fmt.Fprintf(os.Stdout, "Pseudonymization YES... initializing tables...\n")
+        log.Printf("Pseudonymization YES... initializing tables...\n")
 		lists = init_subnets(16, 16, []byte("masterkey"))
 	} else {
 		lists = nil
-		fmt.Fprintf(os.Stdout, "Pseudonymization NO\n")
+        log.Printf("Pseudonymization NO\n")
 	}
 
 	/* --- Connect to the Kafka Cluster --- */
@@ -249,13 +249,13 @@ func main() {
 	filename, _ := createFileName(*path, start)
 	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "os.Create: %s: %v\n", filename, err)
+		log.Printf("os.Create: %s: %v\n", filename, err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stdout, "File %s has been created\n", filename)
+	log.Printf("File %s has been created\n", filename)
 	ok := writeColumnDescr(file, fields)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
+		log.Printf("No descriptors defined... exiting...\n")
 		os.Exit(1)
 	}
 
@@ -275,13 +275,13 @@ func main() {
 			filename, _ = createFileName(*path, start)
 			file, err = os.Create(filename)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "os.Create: %s: %v\n", filename, err)
+				log.Printf("os.Create: %s: %v\n", filename, err)
 				os.Exit(1)
 			}
-			fmt.Fprintf(os.Stdout, "File %s has been created\n", filename)
+			log.Printf("File %s has been created\n", filename)
 			ok := writeColumnDescr(file, fields)
 			if !ok {
-				fmt.Fprintf(os.Stderr, "No descriptors defined... exiting...\n")
+				log.Printf("No descriptors defined... exiting...\n")
 				os.Exit(1)
 			}
 			go timeout(time.Duration(*duration), ch)
