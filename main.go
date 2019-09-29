@@ -1,3 +1,5 @@
+/* --- TODO: Better Naming (lists, functions) --- */
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+    "container/list"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -31,7 +34,12 @@ var kafkaConn = kafka.Connector{}
 var usrcrd = flag.String("u", "", "Path to the user credential file")
 var path = flag.String("p", "", "Path to the target directory where the CSV output files are saved")
 var duration = flag.Int("d", 5, "Amount of time that is written into one file")
-var gc = flag.Int("gc", 50, "Garbage Collector behavior. Default=50%")
+var gc = flag.Int("gc", 50, "Defines garbage collector behavior. Default=50%")
+
+type fileNode struct {
+    uts uint64
+    fd *os.File
+}
 
 func readIni(path string) (content map[string]string, ok bool) {
 	log.Printf("Trying to read from file %s\n", path)
@@ -100,6 +108,50 @@ func expandDatePart(part string) string {
 		expandedPart = part
 	}
 	return expandedPart
+}
+
+func createFileNode(time uint64, timeOffset uint64, fields []string) fileNode {
+    var node fileNode
+    node.uts = time - timeOffset
+    pathname := *path + strconv.FormatUint(node.uts, 10) + ".csv"
+
+    file, err := os.Create(pathname)
+    if err != nil {
+        log.Printf("os.Create: %s: %v\n", pathname, err)
+        os.Exit(1)
+    }
+    log.Printf("File %s has been created\n", pathname)
+
+	ok := writeColumnDescr(file, fields)
+	if !ok {
+		log.Printf("No descriptors defined... exiting...\n")
+		os.Exit(1)
+	}
+
+    node.fd = file
+
+    return node
+}
+
+func createFileList(fields []string) *list.List {
+    l := list.New()
+    time := uint64(time.Now().Unix())
+
+    for i := uint64(0); i < 4*uint64(*duration)*60; i = i + uint64(*duration) * 60 {
+        node := createFileNode(time, i, fields)
+        l.PushBack(node)
+    }
+    return l
+}
+
+func updateFileList(l *list.List, fields []string) {
+    time := uint64(time.Now().Unix())
+
+    node := createFileNode(time, 0, fields)
+    l.PushFront(node)
+    tmp := l.Back().Value.(fileNode)
+    tmp.fd.Close()
+    l.Remove(l.Back())
 }
 
 func init_list(list *[]uint16, different_nmbrs int) {
@@ -188,7 +240,16 @@ func processIPs(credentials map[string]string, addr []byte, lists *[]*[]uint16) 
 	return net.IP(addr)
 }
 
-func writeToCsv(credentials map[string]string, file *os.File, fields []string, lists *[]*[]uint16) {
+func writeCsvLine(fileList *list.List, csv_line *string, flowTimeStamp uint64) {
+    for e := fileList.Front(); e != nil; e = e.Next() {
+        if e.Value.(fileNode).uts < flowTimeStamp {
+            fmt.Fprintf(e.Value.(fileNode).fd, "%s\n", *csv_line)
+            return
+        }
+    }
+}
+
+func writeToCsv(credentials map[string]string, fileList *list.List, fields []string, lists *[]*[]uint16) {
 	var csv_line string
 	var csv_line_len int
 
@@ -225,10 +286,11 @@ func writeToCsv(credentials map[string]string, file *os.File, fields []string, l
 			csv_line = csv_line + fmt.Sprint(field) + ","
 		}
 	}
+    flowTimeStamp := flow.GetTimeFlowStart()
 	csv_line_len = len(csv_line)
 	csv_line = csv_line[:csv_line_len-1]
-	fmt.Fprintf(file, "%s\n", csv_line)
-	csv_line = ""
+    writeCsvLine(fileList, &csv_line, flowTimeStamp)
+	//fmt.Fprintf(file, "%s\n", csv_line)
 }
 
 func main() {
@@ -261,19 +323,28 @@ func main() {
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
 
-	start := time.Now()
-	filename, _ := createFileName(*path, start)
-	file, err := os.Create(filename)
+    /* --- deprecated --- */
+	//start := time.Now()
+	//filename, _ := createFileName(*path, start)
+    /* --- deprecated --- */
+    /*
+    ut := uint64(time.Now().Unix())
+    filename := strconv.FormatUint(ut, 10)
+    pathname := *path + filename + ".csv"
+	file, err := os.Create(pathname)
 	if err != nil {
-		log.Printf("os.Create: %s: %v\n", filename, err)
+		log.Printf("os.Create: %s: %v\n", pathname, err)
 		os.Exit(1)
 	}
-	log.Printf("File %s has been created\n", filename)
+	log.Printf("File %s has been created\n", pathname)
 	ok := writeColumnDescr(file, fields)
 	if !ok {
 		log.Printf("No descriptors defined... exiting...\n")
 		os.Exit(1)
 	}
+    */
+
+    fileList := createFileList(fields)
 
 	ch := make(chan bool)
 
@@ -282,29 +353,38 @@ func main() {
 	for {
 		select {
 		case _ = <-ch:
+            
+            /*
 			err := file.Close()
 			if err != nil {
 				fmt.Println(err)
 			}
+            */
+            updateFileList(fileList, fields)
 
-			start = time.Now()
-			filename, _ = createFileName(*path, start)
-			file, err = os.Create(filename)
+			//start = time.Now()
+			//filename, _ = createFileName(*path, start)
+            /*
+            ut = uint64(time.Now().Unix())
+            filename = strconv.FormatUint(ut, 10)
+            pathname = *path + filename + ".csv"
+			file, err = os.Create(pathname)
 			if err != nil {
-				log.Printf("os.Create: %s: %v\n", filename, err)
+				log.Printf("os.Create: %s: %v\n", pathname, err)
 				os.Exit(1)
 			}
-			log.Printf("File %s has been created\n", filename)
+			log.Printf("File %s has been created\n", pathname)
 			ok := writeColumnDescr(file, fields)
 			if !ok {
 				log.Printf("No descriptors defined... exiting...\n")
 				os.Exit(1)
 			}
+            */
 			go timeout(time.Duration(*duration), ch)
 		default:
-			writeToCsv(credentials, file, fields, lists)
+			writeToCsv(credentials, fileList, fields, lists)
 		}
 	}
 
-	file.Close()
+	//file.Close()
 }
