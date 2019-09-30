@@ -3,6 +3,7 @@
 package main
 
 import (
+	"container/list"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -13,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-    "container/list"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -37,8 +37,8 @@ var duration = flag.Int("d", 5, "Amount of time that is written into one file")
 var gc = flag.Int("gc", 50, "Defines garbage collector behavior. Default=50%")
 
 type fileNode struct {
-    uts uint64
-    fd *os.File
+	uts uint64
+	fd  *os.File
 }
 
 func readIni(path string) (content map[string]string, ok bool) {
@@ -111,16 +111,16 @@ func expandDatePart(part string) string {
 }
 
 func createFileNode(time uint64, timeOffset uint64, fields []string) fileNode {
-    var node fileNode
-    node.uts = time - timeOffset
-    pathname := *path + strconv.FormatUint(node.uts, 10) + ".csv"
+	var node fileNode
+	node.uts = time - timeOffset
+	pathname := *path + strconv.FormatUint(node.uts, 10) + ".csv"
 
-    file, err := os.Create(pathname)
-    if err != nil {
-        log.Printf("os.Create: %s: %v\n", pathname, err)
-        os.Exit(1)
-    }
-    log.Printf("File %s has been created\n", pathname)
+	file, err := os.Create(pathname)
+	if err != nil {
+		log.Printf("os.Create: %s: %v\n", pathname, err)
+		os.Exit(1)
+	}
+	log.Printf("File %s has been created\n", pathname)
 
 	ok := writeColumnDescr(file, fields)
 	if !ok {
@@ -128,30 +128,42 @@ func createFileNode(time uint64, timeOffset uint64, fields []string) fileNode {
 		os.Exit(1)
 	}
 
-    node.fd = file
+	node.fd = file
 
-    return node
+	return node
 }
 
 func createFileList(fields []string) *list.List {
-    l := list.New()
-    time := uint64(time.Now().Unix())
+	l := list.New()
+	time := uint64(time.Now().Unix())
 
-    for i := uint64(0); i < 4*uint64(*duration)*60; i = i + uint64(*duration) * 60 {
-        node := createFileNode(time, i, fields)
-        l.PushBack(node)
-    }
-    return l
+	for i := uint64(0); i < 4*uint64(*duration)*60; i = i + uint64(*duration)*60 {
+		node := createFileNode(time, i, fields)
+		l.PushBack(node)
+	}
+	return l
 }
 
 func updateFileList(l *list.List, fields []string) {
-    time := uint64(time.Now().Unix())
+	time := uint64(time.Now().Unix())
 
-    node := createFileNode(time, 0, fields)
-    l.PushFront(node)
-    tmp := l.Back().Value.(fileNode)
-    tmp.fd.Close()
-    l.Remove(l.Back())
+	node := createFileNode(time, 0, fields)
+	l.PushFront(node)
+	tmp := l.Back().Value.(fileNode)
+	tmp.fd.Close()
+	l.Remove(l.Back())
+}
+
+func closeFileList(l *list.List) bool {
+	var err error
+	for e := l.Front(); e != nil; e = e.Next() {
+		err = e.Value.(fileNode).fd.Close()
+	}
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
 }
 
 func init_list(list *[]uint16, different_nmbrs int) {
@@ -224,29 +236,13 @@ func writeColumnDescr(file *os.File, fields []string) bool {
 	}
 }
 
-/* --- Not in use atm --- */
-func processIPs(credentials map[string]string, addr []byte, lists *[]*[]uint16) net.IP {
-	if credentials["anonymization"] == "yes" {
-		if len(addr) == 4 {
-			addr = pseudomyze_ip(addr, lists)
-		} else if len(addr) == 16 {
-			h := hmac.New(sha256.New, bMasterkey)
-			h.Write(addr[8:])
-			for i := 8; i < 16; i++ {
-				addr[i] = h.Sum(nil)[i]
-			}
+func writeCsvLine(fileList *list.List, csv_line *string, flowTimeStamp uint64) {
+	for e := fileList.Front(); e != nil; e = e.Next() {
+		if e.Value.(fileNode).uts < flowTimeStamp {
+			fmt.Fprintf(e.Value.(fileNode).fd, "%s\n", *csv_line)
+			return
 		}
 	}
-	return net.IP(addr)
-}
-
-func writeCsvLine(fileList *list.List, csv_line *string, flowTimeStamp uint64) {
-    for e := fileList.Front(); e != nil; e = e.Next() {
-        if e.Value.(fileNode).uts < flowTimeStamp {
-            fmt.Fprintf(e.Value.(fileNode).fd, "%s\n", *csv_line)
-            return
-        }
-    }
 }
 
 func writeToCsv(credentials map[string]string, fileList *list.List, fields []string, lists *[]*[]uint16) {
@@ -274,8 +270,8 @@ func writeToCsv(credentials map[string]string, fileList *list.List, fields []str
 					byteAddr = pseudomyze_ip(byteAddr, lists)
 				} else if len(byteAddr) == 16 {
 					h := hmac.New(sha256.New, bMasterkey)
-					h.Write(byteAddr[8:])
-					for i := 8; i < 16; i++ {
+					h.Write(byteAddr[6:])
+					for i := 6; i < 16; i++ {
 						byteAddr[i] = h.Sum(nil)[i]
 					}
 				}
@@ -286,11 +282,10 @@ func writeToCsv(credentials map[string]string, fileList *list.List, fields []str
 			csv_line = csv_line + fmt.Sprint(field) + ","
 		}
 	}
-    flowTimeStamp := flow.GetTimeFlowStart()
+	flowTimeStamp := flow.GetTimeFlowStart()
 	csv_line_len = len(csv_line)
 	csv_line = csv_line[:csv_line_len-1]
-    writeCsvLine(fileList, &csv_line, flowTimeStamp)
-	//fmt.Fprintf(file, "%s\n", csv_line)
+	writeCsvLine(fileList, &csv_line, flowTimeStamp)
 }
 
 func main() {
@@ -323,28 +318,7 @@ func main() {
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
 
-    /* --- deprecated --- */
-	//start := time.Now()
-	//filename, _ := createFileName(*path, start)
-    /* --- deprecated --- */
-    /*
-    ut := uint64(time.Now().Unix())
-    filename := strconv.FormatUint(ut, 10)
-    pathname := *path + filename + ".csv"
-	file, err := os.Create(pathname)
-	if err != nil {
-		log.Printf("os.Create: %s: %v\n", pathname, err)
-		os.Exit(1)
-	}
-	log.Printf("File %s has been created\n", pathname)
-	ok := writeColumnDescr(file, fields)
-	if !ok {
-		log.Printf("No descriptors defined... exiting...\n")
-		os.Exit(1)
-	}
-    */
-
-    fileList := createFileList(fields)
+	fileList := createFileList(fields)
 
 	ch := make(chan bool)
 
@@ -353,38 +327,13 @@ func main() {
 	for {
 		select {
 		case _ = <-ch:
-            
-            /*
-			err := file.Close()
-			if err != nil {
-				fmt.Println(err)
-			}
-            */
-            updateFileList(fileList, fields)
+			updateFileList(fileList, fields)
 
-			//start = time.Now()
-			//filename, _ = createFileName(*path, start)
-            /*
-            ut = uint64(time.Now().Unix())
-            filename = strconv.FormatUint(ut, 10)
-            pathname = *path + filename + ".csv"
-			file, err = os.Create(pathname)
-			if err != nil {
-				log.Printf("os.Create: %s: %v\n", pathname, err)
-				os.Exit(1)
-			}
-			log.Printf("File %s has been created\n", pathname)
-			ok := writeColumnDescr(file, fields)
-			if !ok {
-				log.Printf("No descriptors defined... exiting...\n")
-				os.Exit(1)
-			}
-            */
 			go timeout(time.Duration(*duration), ch)
 		default:
 			writeToCsv(credentials, fileList, fields, lists)
 		}
 	}
 
-	//file.Close()
+	closeFileList(fileList)
 }
