@@ -27,7 +27,10 @@ import (
 	"runtime/debug"
 )
 
-var bMasterkey []byte
+const longForm = "Jan 2, 2006 at 3:04pm (MST)"
+
+var b_v4_Masterkey []byte
+var b_v6_Masterkey []byte
 var kafkaConn = kafka.Connector{}
 
 /* --- COMMAND LINE FLAGS --- */
@@ -35,6 +38,8 @@ var usrcrd = flag.String("u", "", "Path to the user credential file")
 var path = flag.String("p", "", "Path to the target directory where the CSV output files are saved")
 var duration = flag.Int("d", 5, "Amount of time that is written into one file")
 var gc = flag.Int("gc", 50, "Defines garbage collector behavior. Default=50%")
+var timeToStart = flag.String("t", "", "Time when the collecting should start at")
+var finalPath = ""
 
 type fileNode struct {
 	uts uint64
@@ -62,12 +67,13 @@ func readIni(path string) (content map[string]string, ok bool) {
 	return content, ok
 }
 
-func retrieve_masterkey(credentials map[string]string) (masterkey []byte) {
-	sMasterkey := credentials["masterkey"]
-	if sMasterkey == "" {
-		return nil
+func retrieve_masterkeys(credentials map[string]string) (b_v4_masterkey []byte, b_v6_masterkey []byte) {
+	s_v4_Masterkey := credentials["v4_masterkey"]
+	s_v6_Masterkey := credentials["v6_masterkey"]
+	if s_v4_Masterkey == "" || s_v6_Masterkey == "" {
+		return nil, nil
 	} else {
-		return []byte(sMasterkey)
+		return []byte(s_v4_Masterkey), []byte(s_v6_Masterkey)
 	}
 }
 
@@ -110,10 +116,15 @@ func expandDatePart(part string) string {
 	return expandedPart
 }
 
+func createFilePath() {
+	finalPath = strings.TrimSuffix(*path, "/") + "/" + strings.Replace(*timeToStart, " ", "", -1) + "/"
+	os.Mkdir(finalPath, 0770)
+}
+
 func createFileNode(time uint64, timeOffset uint64, fields []string) fileNode {
 	var node fileNode
 	node.uts = time - timeOffset
-	pathname := *path + strconv.FormatUint(node.uts, 10) + ".csv"
+	pathname := finalPath + strconv.FormatUint(node.uts, 10) + ".csv"
 
 	file, err := os.Create(pathname)
 	if err != nil {
@@ -269,7 +280,7 @@ func writeToCsv(credentials map[string]string, fileList *list.List, fields []str
 				if len(byteAddr) == 4 {
 					byteAddr = pseudomyze_ip(byteAddr, lists)
 				} else if len(byteAddr) == 16 {
-					h := hmac.New(sha256.New, bMasterkey)
+					h := hmac.New(sha256.New, b_v6_Masterkey)
 					h.Write(byteAddr[6:])
 					for i := 6; i < 16; i++ {
 						byteAddr[i] = h.Sum(nil)[i]
@@ -288,6 +299,19 @@ func writeToCsv(credentials map[string]string, fileList *list.List, fields []str
 	writeCsvLine(fileList, &csv_line, flowTimeStamp)
 }
 
+func wait(t time.Time) {
+	currentTime := time.Now()
+	if t.Before(currentTime) {
+		return
+	}
+	currentTimeUnix := currentTime.Unix()
+	tUnix := t.Unix()
+	timeDiffUnix := tUnix - currentTimeUnix
+	log.Printf("Going to wait %v seconds...\n", timeDiffUnix)
+	time.Sleep(time.Duration(timeDiffUnix) * time.Second)
+	return
+}
+
 func main() {
 	flag.Parse()
 	fields := flag.Args()
@@ -298,21 +322,28 @@ func main() {
 	/* --- Process given credential file  --- */
 	credentials, _ := readIni(*usrcrd)
 
+	/* --- Wait --- */
+	t, _ := time.Parse(longForm, *timeToStart)
+	log.Println("Collecting starts at:", t)
+	wait(t)
+
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
 	var lists *[]*[]uint16
 	if credentials["anonymization"] == "yes" {
 		log.Printf("Pseudonymization YES... initializing tables...\n")
 		/* --- Retrieve Masterkey --- */
-		bMasterkey = retrieve_masterkey(credentials)
-		if bMasterkey == nil {
+		b_v4_Masterkey, b_v6_Masterkey = retrieve_masterkeys(credentials)
+		if b_v4_Masterkey == nil {
 			log.Printf("No Masterkey given... exiting...\n")
 			os.Exit(255)
 		}
-		lists = init_subnets(16, 16, bMasterkey)
+		lists = init_subnets(16, 16, b_v4_Masterkey)
 	} else {
 		lists = nil
 		log.Printf("Pseudonymization NO\n")
 	}
+
+	createFilePath()
 
 	/* --- Connect to the Kafka Cluster --- */
 	connectToKafka(credentials)
