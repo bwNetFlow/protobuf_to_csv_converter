@@ -27,15 +27,13 @@ import (
 	"runtime/debug"
 )
 
-const longForm = "Jan 2, 2006 at 3:04pm (MST)"
-
 var b_v4_Masterkey []byte
 var b_v6_Masterkey []byte
 var kafkaConn = kafka.Connector{}
 
 /* --- COMMAND LINE FLAGS --- */
-var usrcrd = flag.String("u", "", "Path to the user credential file")
-var path = flag.String("p", "", "Path to the target directory where the CSV output files are saved")
+var usrcrd = flag.String("u", ".", "Path to the user credential file")
+var path = flag.String("p", ".", "Path to the target directory where the CSV output files are saved")
 var duration = flag.Int("d", 5, "Amount of time that is written into one file")
 var gc = flag.Int("gc", 50, "Defines garbage collector behavior. Default=50%")
 var timeToStart = flag.String("t", "", "Time when the collecting should start at")
@@ -144,9 +142,9 @@ func createFileNode(time uint64, timeOffset uint64, fields []string) fileNode {
 	return node
 }
 
-func createFileList(fields []string) *list.List {
+func createFileList(fields []string, starttime time.Time) *list.List {
 	l := list.New()
-	time := uint64(time.Now().Unix())
+	time := uint64(starttime.Unix())
 
 	for i := uint64(0); i < 4*uint64(*duration)*60; i = i + uint64(*duration)*60 {
 		node := createFileNode(time, i, fields)
@@ -323,7 +321,7 @@ func main() {
 	credentials, _ := readIni(*usrcrd)
 
 	/* --- Wait --- */
-	t, _ := time.Parse(longForm, *timeToStart)
+	t, _ := time.Parse(time.RFC3339, *timeToStart)
 	log.Println("Collecting starts at:", t)
 	wait(t)
 
@@ -349,7 +347,7 @@ func main() {
 	connectToKafka(credentials)
 	defer kafkaConn.Close()
 
-	fileList := createFileList(fields)
+	fileList := createFileList(fields, t)
 
 	ch := make(chan bool)
 
