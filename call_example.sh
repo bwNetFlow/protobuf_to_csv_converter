@@ -1,2 +1,2 @@
 #!/bin/sh
-./main -u ~/tmp/test.ini -p /vol/raid/datasets/bwNetFlow/ -d 60 -gc 50 -t "2019-10-17T14:44:00+02:00" TimeFlowStart TimeFlowEnd Duration Bytes Packets SrcAddr DstAddr Etype Proto SrcPort DstPort SrcIf DstIf SrcVlan DstVlan VlanId IngressVrfID EgressVrfID IPTos ForwardingStatus IPTTL TCPFlags IcmpType IcmpCode IPv6FlowLabel IPv6ExtensionHeaders FragmentId FragmentOffset BiFlowDirection SrcAS DstAS NextHop NextHopAS SrcNet DstNet SrcIf DstIf FlowDirection Cid
+./main -u ~/tmp/test.ini -p /vol/raid/datasets/bwNetFlow/ -d 10 -gc 50 -t "2019-11-04T16:39:00+01:00" TimeFlowStart TimeFlowEnd Duration Bytes Packets SrcAddr DstAddr Etype Proto SrcPort DstPort IPTos ForwardingStatus 

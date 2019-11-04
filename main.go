@@ -154,7 +154,8 @@ func createFileList(fields []string, starttime time.Time) *list.List {
 }
 
 func updateFileList(l *list.List, fields []string) {
-	time := uint64(time.Now().Unix())
+	//time := uint64(time.Now().Unix())
+	time := l.Front().Value.(fileNode).uts + uint64(*duration)*60
 
 	node := createFileNode(time, 0, fields)
 	l.PushFront(node)
@@ -322,7 +323,7 @@ func main() {
 
 	/* --- Wait --- */
 	t, _ := time.Parse(time.RFC3339, *timeToStart)
-	log.Println("Collecting starts at:", t)
+	log.Println("Collecting starts at ", t)
 	wait(t)
 
 	/* --- Initialize Knuth-Fisher-Yates Tables  --- */
